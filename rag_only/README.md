@@ -1,52 +1,48 @@
-# Universität Göttingen: StudIT RAG Pipeline
+# Universität Göttingen: StudIT‑RAG‑Pipeline
 
-This project implements a **Retrieval-Augmented Generation (RAG)** pipeline using LangChain to provide question-answering support about StudIT services at Geor-August-Universität Göttingen. The system involves three Jupyter Notebooks that together perform **web crawling**, **document indexing**, and **contextual answer generation** using large language models. It was created as part of the Master Thesis of Jakob Eilts.
-
----
-
-## Notebooks Overview
-
-| Notebook                           | Purpose                                                            |
-| ---------------------------------- | ------------------------------------------------------------------ |
-| `1_crawl.ipynb`                    | Crawls web pages and stores visible content                        |
-| `2_chunk_and_store.ipynb`          | Chunks text, embeds it, and stores it in a FAISS vector index      |
-| `3_retrieval_and_generation.ipynb` | Loads the index, retrieves relevant context, and generates answers |
+Dieses Projekt implementiert eine **Retrieval‑Augmented Generation (RAG)**‑Pipeline mit LangChain, um Fragen rund um die StudIT‑Services der Georg‑August‑Universität Göttingen zu beantworten. Die Lösung besteht aus drei Jupyter‑Notebooks, die zusammen **Web‑Crawling**, **Dokumenten‑Indexierung** und **kontextuelle Antwortgenerierung** mit großen Sprachmodellen durchführen. Entstanden ist das System im Rahmen der Masterarbeit von Jakob Eilts.
 
 ---
 
-## 1. `1_crawl.ipynb` – Web Crawling
+## Überblick über die Notebooks
 
-This notebook scrapes raw text content from a predefined list of URLs and serializes the output.
-
-### Steps:
-
-* **Extract visible text only** using `BeautifulSoup`, removing `<script>`, `<style>`, etc.
-* **Request and parse URLs** in `helper.list_of_all_html.urls`.
-* **Create LangChain `Document` objects** for each URL.
-* **Save the list of `Document`s** to a compressed pickle file: `docs.pkl.gz`.
-
-> Output: `docs.pkl.gz` – A GZIP-compressed list of LangChain documents with URL metadata.
+| Notebook                           | Zweck                                                                          |
+| ---------------------------------- | ------------------------------------------------------------------------------ |
+| `1_crawl.ipynb`                    | Crawlt Webseiten und speichert sichtbare Inhalte                               |
+| `2_chunk_and_store.ipynb`          | Zerteilt den Text, bettet ihn ein und speichert ihn in einem FAISS‑Vektorindex |
+| `3_retrieval_and_generation.ipynb` | Lädt den Index, ruft relevanten Kontext ab und generiert Antworten             |
 
 ---
 
-## 2. `2_chunk_and_store.ipynb` – Text Chunking & Indexing
+## 1. `1_crawl.ipynb` – Web‑Crawling
 
-This notebook prepares the raw data for semantic search.
+Dieses Notebook extrahiert Rohtext von einer vordefinierten Liste von URLs und serialisiert das Ergebnis.
 
-### Steps:
+### Schritte
 
-#### 1. Load Documents
+* **Nur sichtbaren Text extrahieren** mit `BeautifulSoup`; entfernt werden `<script>`, `<style>` usw.
+* **URLs anfragen und parsen** aus `helper.list_of_all_html.urls`.
+* **LangChain‑`Document`‑Objekte** für jede URL erstellen.
+* **Liste der `Document`s speichern** als komprimierte Pickle‑Datei: `docs.pkl.gz`.
 
-Loads the previously crawled documents:
+> **Ergebnis:** `docs.pkl.gz` – GZIP‑komprimierte Liste von LangChain‑Dokumenten inklusive URL‑Metadaten.
+
+---
+
+## 2. `2_chunk_and_store.ipynb` – Text‑Chunking & Indexierung
+
+Dieses Notebook bereitet die Rohdaten für die semantische Suche vor.
+
+### Schritte
+
+#### 1. Dokumente laden
 
 ```python
 with gzip.open("docs.pkl.gz", "rb") as f:
     docs = pickle.load(f)
 ```
 
-#### 2. Chunk Documents
-
-Splits the text into overlapping chunks:
+#### 2. Dokumente zerteilen
 
 ```python
 splitter = RecursiveCharacterTextSplitter(
@@ -57,121 +53,104 @@ splitter = RecursiveCharacterTextSplitter(
 chunks = splitter.split_documents(docs)
 ```
 
-#### 3. Generate Embeddings & Build Vector Store
+#### 3. Einbettungen erzeugen & Vektorspeicher aufbauen
 
-* Embeddings generated using **GWDG’s AcademicCloud API**.
-* Indexed with **FAISS** for fast similarity search.
-* Saved locally as `faiss_wiki_index`.
+* Einbettungen werden über die **AcademicCloud‑API der GWDG** erzeugt.
+* Indexierung erfolgt mit **FAISS** für schnelle Ähnlichkeitssuche.
+* Lokal gespeichert als `faiss_wiki_index`.
 
 ```python
 store = FAISS.from_documents(chunks, embedder)
 store.save_local("faiss_wiki_index")
 ```
 
-> Output: `faiss_wiki_index/` – Local vector store folder ready for loading.
+> **Ergebnis:** `faiss_wiki_index/` – Lokaler Vektorspeicher, bereit zum Laden.
 
 ---
 
 ## 3. `3_retrieval_and_generation.ipynb` – Question Answering
 
-This notebook implements the **retrieval and generation orchestration** using LangChain + LangGraph.
+Dieses Notebook orchestriert **Retrieval und Generierung** mit LangChain + LangGraph.
 
-### 1. Define Prompt
+### 1. Prompt definieren
 
-Custom RAG prompt in German with rules:
+Deutschsprachiger RAG‑Prompt mit Regeln:
 
-* Prefer German responses
-* Be brief but precise
-* Suggest trusted sources when unsure
+* Antworten bevorzugt auf Deutsch
+* Kurz, aber präzise
+* Bei Unsicherheit vertrauenswürdige Quellen vorschlagen
 
 ```text
 Du bist der hilfreiche StudIT‑Assistent der Universität Göttingen.
 ...
-Nutze den folgenden Kontext um die Frage zu beantworten:
+Nutze den folgenden Kontext, um die Frage zu beantworten:
 {context}
 Frage: {question}
-Helpful Answer:
+Hilfreiche Antwort:
 ```
 
-### 2. Setup Vector Store & LLM
+### 2. Vektorspeicher & LLM einrichten
 
-* Loads FAISS index
-* Loads LLM: `meta-llama-3.1-8b-instruct` from GWDG via API
+* FAISS‑Index laden
+* LLM laden: `meta‑llama‑3.1‑8b‑instruct` über die GWDG‑API
 
 ```python
 vector_store = FAISS.load_local(...)
 llm = ChatOpenAI(...)
 ```
 
-### 3. Define Graph State & Nodes
+### 3. Graph‑State & Nodes definieren
 
-LangGraph orchestrates a 2-step pipeline:
+LangGraph steuert eine 2‑stufige Pipeline:
 
-1. `retrieve(state)`: Semantic search based on user query.
-2. `generate(state)`: Answer using prompt and retrieved context.
+1. `retrieve(state)`: Semantische Suche basierend auf der Benutzer‑Query.
+2. `generate(state)`: Antwort mithilfe des Prompts und des gefundenen Kontexts.
 
 ```python
 graph_builder = StateGraph(State).add_sequence([retrieve, generate])
 graph = graph_builder.compile()
 ```
 
-### 4. Run End-to-End QA
-
-Define your question and run the graph:
+### 4. End‑to‑End‑QA ausführen
 
 ```python
-question = "Welche Services bietet studIT?"
+question = "Welche Services bietet StudIT?"
 result = graph.invoke({"question": question})
 print(result["answer"])
 ```
 
-> Output: Answer in German, derived from the relevant document context.
+> **Ausgabe:** Antwort auf Deutsch, abgeleitet aus dem relevanten Dokumentenkontext.
 
 ---
 
-## Secrets Required
+## Benötigte Secrets
 
-Store the following secrets securely in `.streamlit/secrets.toml` or a similar mechanism used by Streamlit:
+Die folgenden Secrets sollten sicher in `.streamlit/secrets.toml` (oder einem ähnlichen Mechanismus) abgelegt werden:
 
 ```toml
-GWDG_API_KEY = "your-api-key-here"
+GWDG_API_KEY        = "your-api-key-here"
 BASE_URL_EMBEDDINGS = "https://your-embedding-endpoint"
-BASE_URL = "https://your-llm-endpoint"
+BASE_URL            = "https://your-llm-endpoint"
 ```
 
 ---
 
-## Requirements
+## Anforderungen
 
-Ensure the following packages are installed:
-
-* `langchain`
-* `langchain_community`
-* `langgraph`
-* `streamlit`
-* `faiss-cpu` or `faiss-gpu`
-* `beautifulsoup4`, `requests`, `pickle`, `gzip`
+Installiere Pakete aus der requirements.txt
+`pip install -r requirements.txt`
 
 ---
 
-## Summary
+## Zusammenfassung
 
-This modular RAG system:
+Dieses modulare RAG‑System
 
-* Crawls and stores academic web content
-* Converts raw HTML into vectorized knowledge
-* Answers user queries using LangChain's orchestration
+* crawlt akademische Webinhalte,
+* wandelt Roh‑HTML in vektorisierte Wissenseinheiten um und
+* beantwortet Benutzerfragen durch LangChains Orchestrierung.
 
-The system can be adapted to other universities or domains by updating:
+Für andere Universitäten oder Domänen genügt es, …
 
-* The `urls` list (in `1_crawl.ipynb`)
-* Prompt template (in `3_retrieval_and_generation.ipynb`)
-
----
-
-**Ready to deploy your own contextual assistant!**
-
----
-
-**a.** Add unit tests for crawling, chunking, and retrieval
-**b.** Add a web UI using Streamlit to ask questions interactively
+* die URL‑Liste in `1_crawl.ipynb` anzupassen und
+* das Prompt‑Template in `3_retrieval_and_generation.ipynb` zu verändern.
