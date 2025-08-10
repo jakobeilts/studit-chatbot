@@ -6,13 +6,12 @@ from datetime import datetime, timezone
 
 import streamlit as st
 from langchain.chat_models import init_chat_model
-from langchain_core.prompts import PromptTemplate
 from langchain_community.vectorstores import FAISS
 from langgraph.graph import MessagesState, StateGraph, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.tools import tool
-from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
+from langchain_core.messages import SystemMessage, AIMessage
 from langchain_core.documents import Document
 from typing_extensions import List
 import smtplib, ssl, html
@@ -48,7 +47,7 @@ BASE_RULES = (
     "Du bist der hilfreiche StudIT‑Assistent der Universität Göttingen.\n"
     "• Antworte bevorzugt auf Deutsch.\n"
     "• Antworte so kurz wie möglich, aber so ausführlich wie nötig.\n"
-    "• Stelle Rückfragen, wenn Informationen fehlen.\n"
+    "• Stelle IMMER eine Rückfrage, wenn wichtige Informationen fehlen – z.B. das Betriebssystem, der Standort oder die Zielgruppe. Mache KEINE Annahmen.\n"
     "• Falls du eine fachliche Frage beantwortest, RUFE IMMER zuerst das Tool `retrieve` auf und beantworte erst dann. Antworte niemals mit Fakten aus anderen Quellen.\n"
     "• Falls keine Info da ist, verweise auf offizielle Kontakte (Link/E-Mail).\n"
     "• Alle Fragen beziehen sich auf die Georg-August-Universität Göttingen.\n"
@@ -85,30 +84,38 @@ llm = init_chat_model(
 # ----------------------------------------------------------------------
 class State(MessagesState):
     context: List[Document]          # für spätere Anzeige der Quellen
+    asked: bool = False  # ob eine Rückfrage gestellt wurde
+    current_tool_docs: List[Document] = []
 
 @tool(response_format="content_and_artifact")
 def retrieve(query: str):
     """Sucht passende Wiki‑Dokumente per FAISS und liefert sie zurück."""
-    docs = vector_store.similarity_search(query, k=2)
+    docs = vector_store.similarity_search(query, k=4)
+    print(f"\n📄 RETRIEVED CONTEXTS  (k={len(docs)})")
+    for i, d in enumerate(docs, 1):
+        print(f"\n─── DOC {i} ─────────────────────────────────")
+        print("metadata:", json.dumps(d.metadata, ensure_ascii=False, indent=2))
+        print("content:\n", d.page_content)
     serialized = "\n\n".join(
         (f"Source: {d.metadata}\nContent: {d.page_content}") for d in docs
     )
     return serialized, docs
 
-#@tool(response_format="content")
-#def ask(question: str) -> str:
-#    """Stelle eine Rückfrage an den Nutzer, um, wenn nötig, die Suche, vor der Nutzung des retrieve tools, einzuschränken."""
-#    return f"Ich brauche noch folgende Information, um weiterzumachen: {question}"
+@tool(response_format="content")
+def ask(missing_info: str) -> str:
+    """Stellt eine gezielte Rückfrage an den Nutzer, wenn Informationen fehlen."""
+    return f"Ich brauche noch folgende Information, um weiterzumachen: {missing_info}"
+
 
 def query_or_respond(state: State):
     """Erster LLM-Aufruf: prüft, ob ein Tool nötig ist."""
     messages = [SystemMessage(BASE_RULES)] + state["messages"]
-    resp = llm.bind_tools([retrieve]).invoke(messages)
+    resp = llm.bind_tools([retrieve, ask]).invoke(messages)
     return {"messages": [resp]}
 
 
 
-tools = ToolNode([retrieve])
+tools = ToolNode([retrieve, ask])
 
 
 def generate(state: State):
@@ -139,10 +146,14 @@ def generate(state: State):
 
     # 6. Dokumente speichern
     ctx_docs = []
-    for tm in recent_tool_msgs:
-        ctx_docs.extend(tm.artifact)
+    for tm in reversed(state["messages"]):
+        if tm.type == "tool":
+            artifacts = getattr(tm, "artifact", None)
+            if artifacts:
+                ctx_docs.extend(artifacts)
+            break  # Nur den letzten Tool-Call verwenden
 
-    return {"messages": [resp], "context": ctx_docs}
+    return {"messages": [resp], "context": ctx_docs, "current_tool_docs": ctx_docs}
 
 
 # ----------------------------------------------------------------------
@@ -153,15 +164,37 @@ def build_graph():
     g = StateGraph(State)
     g.add_node(query_or_respond)
     g.add_node(tools)
+
+    def tool_decider(state: State):
+        tool_msg = [m for m in state["messages"] if m.type == "tool"]
+        if not tool_msg:
+            return END
+
+        last_tool = tool_msg[-1].name
+
+        if last_tool == "retrieve":
+            return "generate"
+
+        elif last_tool == "ask":
+            if state.get("asked"):  # Schon gefragt → abbrechen
+                return END
+            else:
+                state["asked"] = True
+                return END  # War erste Frage → auf Antwort warten
+        return END
+
     g.add_node(generate)
 
     g.set_entry_point("query_or_respond")
     g.add_conditional_edges(
         "query_or_respond",
         tools_condition,
-        {END: END, "tools": "tools"},
+        {
+            END: END,
+            "tools": "tools",
+        },
     )
-    g.add_edge("tools", "generate")
+    g.add_conditional_edges("tools", tool_decider, {"generate": "generate", END: END})
     g.add_edge("generate", END)
 
     return g.compile(checkpointer=MemorySaver())  # MemorySaver = Zustands‑Cache
@@ -202,7 +235,8 @@ for m in st.session_state.messages:
 # ----------------------------------------------------------
 # Nutzer‑Eingabe → Graph → Antwort
 # ----------------------------------------------------------
-if user_input := st.chat_input("Frag mich etwas …"):
+if user_input := st.chat_input("Frag mich etwas …",  key="main_chat"):
+    print(f"\n🟢 USER → {user_input}")
     # 1) Nutzer‑Nachricht speichern + loggen
     st.session_state.messages.append({"role": "user", "content": user_input})
     write_log("user", user_input)
@@ -215,24 +249,52 @@ if user_input := st.chat_input("Frag mich etwas …"):
 
     # 3) Antwort speichern + loggen
     ai_msg = result["messages"][-1].content
+    print("\n🤖 BOT ←\n", ai_msg)
     st.session_state.messages.append({"role": "assistant", "content": ai_msg})
     write_log("assistant", ai_msg)
     with st.chat_message("assistant"):
         st.markdown(ai_msg)
 
+        ######################################################################
+        #  ### NEW CODE: build & store the compact RAG report  ###############
+        ######################################################################
+        # Gather up to 4 retrieved passages (already limited to k=4)
+        retrieved_contexts = [
+            doc.page_content if hasattr(doc, "page_content") else doc.get("page_content", "")
+            for doc in result.get("current_tool_docs", [])
+        ]
+
+        # Build the JSON object
+        rag_report = {
+            "user_input": user_input,  # already have it
+            "reference": "",  # fill in if you have a gold answer
+            "retrieved_contexts": retrieved_contexts,
+            "response": ai_msg,
+        }
+
+        # Decide what you want to do with it – here we append to a second log file
+        rag_log_file = os.path.join(LOG_DIR, f"EVAL_{st.session_state.chat_id}_rag.jsonl")
+        print("► Saving RAG log…")
+        print(json.dumps(rag_report, ensure_ascii=False, indent=2))
+        ######################################################################
+
     # 4) Quellen‑Expander
-    if result.get("context"):
+    if result.get("current_tool_docs"):
         st.markdown("### Quellen & Ausschnitte")
-        for i, doc in enumerate(result["context"], 1):
-            # dict‑Fallback für MemorySaver
+
+        seen_sources = set()
+
+        for doc in result["current_tool_docs"]:
             meta = doc.metadata if hasattr(doc, "metadata") else doc.get("metadata", {})
             text = doc.page_content if hasattr(doc, "page_content") else doc.get("page_content", "")
-            url = meta.get("url") or meta.get("source") or "Unbekannte Quelle"
+            source = meta.get("url") or meta.get("source") or "Unbekannte Quelle"
 
-            title = url  # <<< ganze URL als Überschrift
+            if source in seen_sources:
+                continue
+            seen_sources.add(source)
 
-            with st.expander(title):  # Nummerierung optional: f"[{i}] {title}"
-                st.markdown(f"[Zur Quelle]({url})")
+            with st.expander(source):
+                st.markdown(f"[Zur Quelle]({source})")
                 st.markdown(f"> {text[:400]}…")
 
 # ----------------------------------------------------------
@@ -383,12 +445,6 @@ def support_form() -> None:
             support_email=email,
             support_addition=addition,
         )
-        try:
-            send_support_mail("Chatbot‑Supportanfrage", full_msg)
-            st.info("E‑Mail wurde versendet.")
-        except Exception as e:
-            st.error(f"E‑Mail‑Versand fehlgeschlagen: {e}")
-
 
 if st.session_state.get("support_form_visible"):
     support_form()
