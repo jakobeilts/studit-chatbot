@@ -23,18 +23,8 @@ from email.message import EmailMessage
 from helper.academicCloudEmbeddings import AcademicCloudEmbeddings
 st.set_page_config(page_title="StudIT‑Chatbot", page_icon="💬", layout="centered")
 
-
-from pathlib import Path
-import faiss
-
-BASE = Path(__file__).parent  # directory of your app script
-index_path = BASE / "faiss_child_index" / "index.faiss"
-
-if not index_path.exists():
-    raise FileNotFoundError(f"Missing FAISS index: {index_path}")
-
-index = faiss.read_index(str(index_path))
-
+BASE = pathlib.Path(__file__).parent.resolve()
+VECTORSTORE_DIR = BASE / "faiss_child_index"
 
 # ----------------------------------------------------------------------
 # 1.   Logging‑Utility (ein JSONL‑Eintrag pro Chat‑Nachricht)
@@ -132,7 +122,6 @@ BASE_RULES = dedent("""/no_think
 # ----------------------------------------------------------------------
 # 3.   Vektor‑Datenbank + LLM‑Instanz
 # ----------------------------------------------------------------------
-VECTORSTORE_PATH = "faiss_child_index"
 
 embedder = AcademicCloudEmbeddings(
     api_key=st.secrets["GWDG_API_KEY"],
@@ -140,7 +129,7 @@ embedder = AcademicCloudEmbeddings(
 )
 
 vector_store = FAISS.load_local(
-    VECTORSTORE_PATH,
+    str(VECTORSTORE_DIR),
     embedder,
     allow_dangerous_deserialization=True,
 )
