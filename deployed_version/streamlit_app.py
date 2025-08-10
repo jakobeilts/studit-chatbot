@@ -25,6 +25,7 @@ st.set_page_config(page_title="StudIT‑Chatbot", page_icon="💬", layout="cent
 
 BASE = pathlib.Path(__file__).parent.resolve()
 VECTORSTORE_DIR = BASE / "faiss_child_index"
+PARENT_STORE_PATH = BASE / "parent_store.pkl"
 
 # ----------------------------------------------------------------------
 # 1.   Logging‑Utility (ein JSONL‑Eintrag pro Chat‑Nachricht)
@@ -135,7 +136,7 @@ vector_store = FAISS.load_local(
 )
 
 # load parent doc-store
-with open("parent_store.pkl", "rb") as f:
+with open(PARENT_STORE_PATH, "rb") as f:
     parent_store = pickle.load(f)
 
 # re-create the *same* splitter used at index time
