@@ -26,6 +26,7 @@ st.set_page_config(page_title="StudIT‑Chatbot", page_icon="💬", layout="cent
 BASE = pathlib.Path(__file__).parent.resolve()
 VECTORSTORE_DIR = BASE / "faiss_child_index"
 PARENT_STORE_PATH = BASE / "parent_store.pkl"
+LOGO_PATH = BASE / "helper" / "images" / "uni_logo.png"
 
 # ----------------------------------------------------------------------
 # 1.   Logging‑Utility (ein JSONL‑Eintrag pro Chat‑Nachricht)
@@ -296,7 +297,7 @@ config = {"configurable": {"thread_id": "abc123"}}
 # 6.   Streamlit‑UI
 # ----------------------------------------------------------------------
 st.title("StudIT‑Chatbot")
-st.logo("helper/images/uni_logo.png")
+st.logo(LOGO_PATH)
 
 # ----------------------------------------------------------
 # Einmalige Willkommens‑Nachricht (nicht im Verlauf speichern)
