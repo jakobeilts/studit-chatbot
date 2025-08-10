@@ -1,3 +1,8 @@
 /rag_only/.streamlit/secrets.toml
 /1_increment/.streamlit/secrets.toml
+/2_increment_better_prompt/.streamlit/secrets.toml
+/3_increment_better_crawling_and_parent_retriever/.streamlit/secrets.toml
+/4_increment_contextual_retrieval/.streamlit/secrets.toml
+/deployed_version/.streamlit/secrets.toml
+
 /.idea/workspace.xml
