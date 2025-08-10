@@ -24,20 +24,16 @@ from helper.academicCloudEmbeddings import AcademicCloudEmbeddings
 st.set_page_config(page_title="StudIT‑Chatbot", page_icon="💬", layout="centered")
 
 
-import os
 from pathlib import Path
+import faiss
 
-print("CWD =", os.getcwd())
-print("Script dir =", Path(__file__).parent.resolve())
-print("Tree under script dir:")
-for p in (Path(__file__).parent).rglob("*"):
-    if p.is_file() and p.name.endswith(".faiss"):
-        print("   FOUND:", p)
+BASE = Path(__file__).parent  # directory of your app script
+index_path = BASE / "faiss_child_index" / "index.faiss"
 
-candidate = Path(__file__).parent / "faiss_child_index" / "index.faiss"
-print("Candidate absolute path =", candidate.resolve())
-print("Exists? ->", candidate.exists())
+if not index_path.exists():
+    raise FileNotFoundError(f"Missing FAISS index: {index_path}")
 
+index = faiss.read_index(str(index_path))
 
 
 # ----------------------------------------------------------------------
